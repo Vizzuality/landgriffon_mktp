@@ -18,6 +18,7 @@ This repository contains the Landgriffon Marketplace Subscriptions Manager, whic
 
 ## Project Structure
 
+<pre>
 landgriffon_mktp/
 ├── backend/
 │   ├── app/
@@ -44,6 +45,8 @@ landgriffon_mktp/
 │   ├── .gitignore
 ├── .gitignore
 ├── README.md
+</pre>
+
 
 
 ## Setup
