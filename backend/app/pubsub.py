@@ -1,7 +1,6 @@
 import json
 import os
 from google.cloud import pubsub_v1
-from sqlalchemy.orm import Session
 from app.database import get_db, SessionLocal
 from app.models import Subscription
 from dotenv import load_dotenv
@@ -20,28 +19,65 @@ PUBSUB_SUBSCRIPTION = os.getenv('PUBSUB_SUBSCRIPTION')
 logger.info(f"GOOGLE_CLOUD_PROJECT: {PROJECT_ID}")
 logger.info(f"PUBSUB_SUBSCRIPTION: {PUBSUB_SUBSCRIPTION}")
 
+def handle_create_entitlement(payload, db_subscription):
+    db_subscription.data = payload
+    db_subscription.status = "pending"
+
+def handle_cancel_entitlement(payload, db_subscription):
+    if db_subscription:
+        db_subscription.data = payload
+        db_subscription.status = "canceled"
+    else:
+        logger.error(f"No subscription found for ID {payload.get('entitlement', {}).get('id')} to cancel.")
+
+def handle_entitlement_plan_changed(payload, db_subscription):
+    db_subscription.data = payload
+    db_subscription.status = "pending update"
+
+def handle_unknown_event(payload, db_subscription):
+    logger.error(f"Unknown event type for message: {payload}")
+
+event_handlers = {
+    "CREATE_ENTITLEMENT": handle_create_entitlement,
+    "CANCEL_ENTITLEMENT": handle_cancel_entitlement,
+    "ENTITLEMENT_PLAN_CHANGED": handle_entitlement_plan_changed
+}
+
+def determine_event_handler(event_id):
+    for prefix, handler in event_handlers.items():
+        if event_id.startswith(prefix):
+            return handler
+    return handle_unknown_event
+
 def callback(message):
     payload = json.loads(message.data)
     logger.info(f"Received message: {payload}")
     
-    subscription_id = payload.get('entitlement', {}).get('id')
-    if subscription_id:
-        db = SessionLocal()
-        try:
-            db_subscription = db.query(Subscription).filter(Subscription.subscription_id == subscription_id).first()
-            if db_subscription:
-                db_subscription.data = payload
-                logger.info(f"Updating existing subscription with ID {subscription_id}")
-            else:
-                db_subscription = Subscription(subscription_id=subscription_id, data=payload)
-                db.add(db_subscription)
-                logger.info(f"Adding new subscription with ID {subscription_id}")
-            db.commit()
-            logger.info(f"Message with ID {subscription_id} stored in database.")
-        except Exception as e:
-            logger.error(f"Failed to store message in database: {e}")
-        finally:
-            db.close()
+    event_id = payload.get("eventId", "")
+    entitlement = payload.get("entitlement", {})
+    subscription_id = entitlement.get("id")
+    
+    if not subscription_id:
+        logger.error("No subscription ID found in the message.")
+        message.ack()
+        return
+
+    db = SessionLocal()
+    try:
+        db_subscription = db.query(Subscription).filter(Subscription.subscription_id == subscription_id).first()
+        if not db_subscription and not event_id.startswith("CANCEL_ENTITLEMENT"):
+            db_subscription = Subscription(subscription_id=subscription_id, data=payload)
+            db.add(db_subscription)
+        
+        event_handler = determine_event_handler(event_id)
+        event_handler(payload, db_subscription)
+
+        db.commit()
+        logger.info(f"Message with ID {subscription_id} processed and stored in database.")
+    except Exception as e:
+        logger.error(f"Error processing message with ID {subscription_id}: {e}")
+    finally:
+        db.close()
     
     message.ack()
 
