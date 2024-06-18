@@ -20,28 +20,28 @@ This repository contains the Landgriffon Marketplace Subscriptions Manager, whic
 
 landgriffon_mktp/
 ├── backend/
-│ ├── app/
-│ │ ├── init.py
-│ │ ├── database.py
-│ │ ├── models.py
-│ │ ├── pubsub.py
-│ │ ├── routers/
-│ │ │ ├── init.py
-│ │ │ ├── subscriptions.py
-│ ├── main.py
-│ ├── .env
-│ ├── .gitignore
-│ ├── requirements.txt
-│ ├── logging_config.py
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── database.py
+│   │   ├── models.py
+│   │   ├── pubsub.py
+│   │   ├── routers/
+│   │   │   ├── __init__.py
+│   │   │   ├── subscriptions.py
+│   ├── main.py
+│   ├── .env
+│   ├── .gitignore
+│   ├── requirements.txt
+│   ├── logging_config.py
 ├── frontend/
-│ ├── public/
-│ ├── src/
-│ │ ├── components/
-│ │ ├── App.js
-│ │ ├── index.js
-│ ├── package.json
-│ ├── .env
-│ ├── .gitignore
+│   ├── public/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── App.js
+│   │   ├── index.js
+│   ├── package.json
+│   ├── .env
+│   ├── .gitignore
 ├── .gitignore
 ├── README.md
 
