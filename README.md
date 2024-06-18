@@ -73,9 +73,9 @@ landgriffon_mktp/
     Create a `.env` file in the `backend` directory and add the required environment variables:
     ```plaintext
     GOOGLE_CLOUD_PROJECT=your_project_id
-    PUBSUB_SUBSCRIPTION=codelab
-    ACCOUNTS_DATABASE=sqlite:///./test.db
-    GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/credentials.json
+    PUBSUB_SUBSCRIPTION=your_subscription_acount
+    ACCOUNTS_DATABASE=your_db_connection
+    GOOGLE_APPLICATION_CREDENTIALS=your_google_credentials
     ```
 
 ### Frontend Setup
