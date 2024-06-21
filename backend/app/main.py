@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from app.routers import subscriptions
+from app.routers.router import router
 from app.database import engine, Base
 import threading
 from app.pubsub import subscribe_to_pubsub
@@ -35,8 +35,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Include the router for subscription endpoints
-app.include_router(subscriptions.router)
+# Include the router for API endpoints
+app.include_router(router)
 
 # Create the database tables
 Base.metadata.create_all(bind=engine)
