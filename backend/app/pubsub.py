@@ -108,6 +108,9 @@ def handle_entitlement_creation_requested(payload, db):
             db_subscription.consumer_id = consumer_id
             db_subscription.start_time = start_time
             db_subscription.status = "pending"
+        db_account.plan_id = plan_id
+        db_account.start_time = start_time
+        db_account.consumer_id = consumer_id
         db.commit()
         logger.info(f"Entitlement creation requested: {subscription_id}")
     else:
@@ -147,13 +150,26 @@ def handle_entitlement_cancelled(payload, db):
         logger.error("No subscription ID found in the message.")
         return
 
-    db_subscription = db.query(Subscription).filter(Subscription.subscription_id == subscription_id).first()
-    if db_subscription:
-        db_subscription.status = "canceled"
-        db.commit()
-        logger.info(f"Entitlement canceled: {subscription_id}")
-    else:
-        logger.error(f"No subscription found for ID {subscription_id} to cancel.")
+    try:
+        db_subscription = db.query(Subscription).filter(Subscription.subscription_id == subscription_id).first()
+        if db_subscription:
+            # Update the subscription status
+            db_subscription.status = "canceled"
+            db.commit()
+            logger.info(f"Entitlement canceled: {subscription_id}")
+
+            # Update the parent account status
+            account = db.query(Account).filter(Account.id == db_subscription.account_id).first()
+            if account:
+                account.status = "entitlement canceled"
+                db.commit()
+                logger.info(f"Account status updated to 'entitlement canceled': {account.procurement_account_id}")
+            else:
+                logger.error(f"No account found for ID {db_subscription.account_id} to update status.")
+        else:
+            logger.error(f"No subscription found for ID {subscription_id} to cancel.")
+    except Exception as e:
+        logger.error(f"Failed to cancel entitlement {subscription_id}: {e}")
 
 def handle_account_approved(procurement_account_id, db):
     """Handles account approval and related entitlement approvals."""
@@ -171,7 +187,108 @@ def handle_account_approved(procurement_account_id, db):
                 logger.error(f"Failed to approve entitlement {entitlement.subscription_id}: {e}")
     else:
         logger.error(f"No active account found for ID {procurement_account_id} to approve entitlements.")
+        
+def handle_entitlement_deleted(payload, db):
+    entitlement = payload.get('entitlement', {})
+    subscription_id = entitlement.get('id')
+    if not subscription_id:
+        logger.error("No subscription ID found in the message.")
+        return
 
+    try:
+        db_subscription = db.query(Subscription).filter(Subscription.subscription_id == subscription_id).first()
+        if db_subscription:
+            db.delete(db_subscription)
+            db.commit()
+            logger.info(f"Entitlement deleted: {subscription_id}")
+        else:
+            logger.error(f"No subscription found for ID {subscription_id} to delete.")
+    except Exception as e:
+        logger.error(f"Failed to delete entitlement {subscription_id}: {e}")
+
+def handle_account_deleted(payload, db):
+    account_details = payload.get('account', {})
+    procurement_account_id = account_details.get('id')
+    if not procurement_account_id:
+        logger.error("No procurement account ID found in the message.")
+        return
+
+    try:
+        db_account = db.query(Account).filter(Account.procurement_account_id == procurement_account_id).first()
+        if db_account:
+            # Delete all related subscriptions first
+            db.query(Subscription).filter(Subscription.account_id == db_account.id).delete()
+            db.delete(db_account)
+            db.commit()
+            logger.info(f"Account deleted: {procurement_account_id}")
+        else:
+            logger.error(f"No account found for ID {procurement_account_id} to delete.")
+    except Exception as e:
+        logger.error(f"Failed to delete account {procurement_account_id}: {e}")
+        
+def handle_entitlement_plan_change_requested(payload, db):
+    entitlement = payload.get('entitlement', {})
+    subscription_id = entitlement.get('id')
+    new_plan = entitlement.get('newPlan')
+    if not subscription_id or not new_plan:
+        logger.error("No subscription ID or new plan found in the message.")
+        return
+
+    logger.debug(f"Processing plan change request for subscription ID: {subscription_id} to new plan: {new_plan}")
+
+    try:
+        # Update the subscription in the local database
+        db_subscription = db.query(Subscription).filter(Subscription.subscription_id == subscription_id).first()
+        if db_subscription:
+            db_subscription.plan_id = new_plan
+            db_subscription.status = "plan change requested"
+            db.commit()
+            logger.info(f"Entitlement plan change requested: {subscription_id} to new plan {new_plan}")
+
+            account = db.query(Account).filter(Account.id == db_subscription.account_id).first()
+            if account:
+                account.plan_id = new_plan
+                db.commit()
+                logger.info(f"Account plan updated: {account.procurement_account_id}")
+            
+            # Approve the plan change in the procurement API
+            approve_entitlement_plan_change(subscription_id, new_plan)
+        else:
+            logger.error(f"No subscription found for ID {subscription_id} to change plan.")
+    except Exception as e:
+        logger.error(f"Failed to process plan change for entitlement {subscription_id}: {e}")
+
+def handle_entitlement_plan_changed(payload, db):
+    entitlement = payload.get('entitlement', {})
+    subscription_id = entitlement.get('id')
+    if not subscription_id:
+        logger.error("No subscription ID found in the message.")
+        return
+
+    logger.debug(f"Activating plan change for subscription ID: {subscription_id}")
+
+    try:
+        db_subscription = db.query(Subscription).filter(Subscription.subscription_id == subscription_id).first()
+        if db_subscription:
+            db_subscription.status = "active"
+            db.commit()
+            logger.info(f"Entitlement plan changed and activated: {subscription_id}")
+        else:
+            logger.error(f"No subscription found for ID {subscription_id} to activate.")
+    except Exception as e:
+        logger.error(f"Failed to activate entitlement plan change for {subscription_id}: {e}")
+
+
+def approve_entitlement_plan_change(entitlement_id, new_plan):
+    """Approves the entitlement plan change in the Procurement Service."""
+    name = f'providers/DEMO-{PROJECT_ID}/entitlements/{entitlement_id}:approvePlanChange'
+    body = {'pendingPlanName': new_plan}
+    logger.debug(f"Approving plan change for entitlement ID: {entitlement_id} with body: {body}")
+    request = service.providers().entitlements().approvePlanChange(name=name, body=body)
+    request.execute()
+    logger.info(f"Plan change approved for entitlement: {entitlement_id} to plan: {new_plan}")
+            
+            
 def callback(message):
     payload = json.loads(message.data)
     logger.info(f"Received message: {payload}")
@@ -185,6 +302,10 @@ def callback(message):
             "ENTITLEMENT_CREATION_REQUESTED": handle_entitlement_creation_requested,
             "ENTITLEMENT_ACTIVE": handle_entitlement_active,
             "ENTITLEMENT_CANCELLED": handle_entitlement_cancelled,
+            "ENTITLEMENT_DELETED": handle_entitlement_deleted,
+            "ACCOUNT_DELETED": handle_account_deleted,
+            "ENTITLEMENT_PLAN_CHANGE_REQUESTED": handle_entitlement_plan_change_requested,
+            "ENTITLEMENT_PLAN_CHANGED": handle_entitlement_plan_changed,
         }
 
         handler = event_handlers.get(event_type)
