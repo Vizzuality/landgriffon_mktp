@@ -1,17 +1,15 @@
 import json
 import os
-import pprint
 import uuid
 from datetime import datetime
 from google.cloud import pubsub_v1
 from googleapiclient.discovery import build
 from app.database import SessionLocal
 from app.models import Account, Subscription
-from dotenv import load_dotenv
+from backend.config import load_environment
 import logging
 
-# Load environment variables
-load_dotenv()
+load_environment()
 
 # Set up logging
 logger = logging.getLogger(__name__)

@@ -4,19 +4,18 @@ from app.routers.router import router
 from app.database import engine, Base
 import threading
 from app.pubsub import subscribe_to_pubsub
-from dotenv import load_dotenv
 import os
 import logging
 from app.logging_config import setup_logging
+from backend.config import load_environment
 
-# Load environment variables from .env file
-load_dotenv()
+load_environment()
 
-# Set up logging
 setup_logging()
+
 logger = logging.getLogger(__name__)
 
-logger.info("Environment variables loaded:")
+logger.info(f"Environment variables loaded: {os.getenv('ENVIRONMENT')}")
 logger.info(f"GOOGLE_CLOUD_PROJECT: {os.getenv('GOOGLE_CLOUD_PROJECT')}")
 logger.info(f"PUBSUB_SUBSCRIPTION: {os.getenv('PUBSUB_SUBSCRIPTION')}")
 
@@ -31,11 +30,9 @@ async def lifespan(app: FastAPI):
     
     # Shutdown event
     logger.info("Stopping Pub/Sub subscriber...")
-    # Perform any cleanup if necessary
 
 app = FastAPI(lifespan=lifespan)
 
-# Include the router for API endpoints
 app.include_router(router)
 
 # Create the database tables
