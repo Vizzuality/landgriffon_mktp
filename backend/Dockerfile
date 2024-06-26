@@ -1,11 +1,10 @@
-# backend/Dockerfile
 
-FROM python:3.12
-
+FROM python:3.12.1-slim
+RUN pip install poetry
 WORKDIR /app
-
+COPY requirements.txt .
 COPY . .
-
-RUN pip install --no-cache-dir -r requirements.txt
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+RUN poetry install --no-dev
+EXPOSE 8000
+ENV ENVIRONMENT=production
+CMD ["poetry", "run", "gunicorn", "-k", "uvicorn.workers.UvicornWorker", "app.main:app", "--bind", "0.0.0.0:8000", "--workers", "4"]

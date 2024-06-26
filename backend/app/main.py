@@ -7,7 +7,7 @@ from app.pubsub import subscribe_to_pubsub
 import os
 import logging
 from app.logging_config import setup_logging
-from backend.config import load_environment
+from app.config import load_environment
 
 load_environment()
 
@@ -37,7 +37,3 @@ app.include_router(router)
 
 # Create the database tables
 Base.metadata.create_all(bind=engine)
-
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the Landgriffon Marketplace API"}

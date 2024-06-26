@@ -6,7 +6,7 @@ from google.cloud import pubsub_v1
 from googleapiclient.discovery import build
 from app.database import SessionLocal
 from app.models import Account, Subscription
-from backend.config import load_environment
+from app.config import load_environment
 import logging
 
 load_environment()

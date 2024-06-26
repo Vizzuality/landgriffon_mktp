@@ -1,5 +1,4 @@
-
-version: '3.8'
+version: "3.8"
 
 services:
   backend:
@@ -8,12 +7,9 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - ./backend/.env 
-    environment:
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
-      - PUBSUB_SUBSCRIPTION=${PUBSUB_SUBSCRIPTION}
-      - ACCOUNTS_DATABASE=${ACCOUNTS_DATABASE}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+      - ./backend/.env.production
+    depends_on:
+      - frontend
 
   frontend:
     build:
