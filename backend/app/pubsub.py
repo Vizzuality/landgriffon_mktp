@@ -10,6 +10,7 @@ from app.database import SessionLocal
 from app.models import Account, Subscription
 from app.config import load_environment
 import logging
+import asyncio
 
 load_environment()
 
