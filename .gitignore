@@ -122,6 +122,7 @@ backend/*.sqlite3
 
 # Google Cloud Pub/Sub related
 backend/credentials.json
+backend/cred-production.json
 
 # Local development and debugging
 backend/debug.log
