@@ -1,9 +1,8 @@
 import os
 import logging
-import threading
+import asyncio
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from sqlalchemy.ext.asyncio import AsyncEngine
 from app.routers.router import router
 from app.database import engine, Base
 from app.pubsub import subscribe_to_pubsub
@@ -24,8 +23,7 @@ logger.info(f"PUBSUB_SUBSCRIPTION: {os.getenv('PUBSUB_SUBSCRIPTION')}")
 async def lifespan(app: FastAPI):
     # Startup event
     logger.info("Starting Pub/Sub subscriber...")
-    subscriber_thread = threading.Thread(target=subscribe_to_pubsub, daemon=True)
-    subscriber_thread.start()
+    pubsub_task = asyncio.create_task(subscribe_to_pubsub())
     
     # Create the database tables asynchronously
     async with engine.begin() as conn:
@@ -35,6 +33,11 @@ async def lifespan(app: FastAPI):
     
     # Shutdown event
     logger.info("Stopping Pub/Sub subscriber...")
+    pubsub_task.cancel()
+    try:
+        await pubsub_task
+    except asyncio.CancelledError:
+        logger.info("Pub/Sub subscriber cancelled")
 
 app = FastAPI(lifespan=lifespan)
 

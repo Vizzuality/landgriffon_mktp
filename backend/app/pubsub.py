@@ -1,25 +1,43 @@
+# app/pubsub_subscriber.py
+
 import json
 import os
 import uuid
+import asyncio
 from datetime import datetime
 from google.cloud import pubsub_v1
 from googleapiclient.discovery import build
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.future import select
-from app.database import SessionLocal
+from sqlalchemy.orm import sessionmaker
 from app.models import Account, Subscription
 from app.config import load_environment
 import logging
-import asyncio
 
 load_environment()
 
 # Set up logging
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 PROJECT_ID = os.getenv('GOOGLE_CLOUD_PROJECT')
 PUBSUB_SUBSCRIPTION = os.getenv('PUBSUB_SUBSCRIPTION')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+
+# Debugging statement to verify environment variables
+ACCOUNTS_DATABASE = os.getenv('ACCOUNTS_DATABASE')
+if ACCOUNTS_DATABASE is None:
+    logger.error("ACCOUNTS_DATABASE is not set")
+else:
+    logger.info(f"ACCOUNTS_DATABASE: {ACCOUNTS_DATABASE}")
+
+# Initialize the database connection
+engine = create_async_engine(ACCOUNTS_DATABASE, echo=True, future=True)
+AsyncSessionLocal = sessionmaker(
+    bind=engine,
+    expire_on_commit=False,
+    class_=AsyncSession
+)
 
 # Initialize Google API client
 service = build('cloudcommerceprocurement', 'v1', developerKey=GOOGLE_API_KEY)
@@ -316,7 +334,7 @@ async def callback(message):
     
     event_type = payload.get("eventType", "")
     
-    async with SessionLocal() as session:
+    async with AsyncSessionLocal() as session:
         try:
             event_handlers = {
                 "ACCOUNT_ACTIVE": handle_account_created,
@@ -336,24 +354,25 @@ async def callback(message):
                 logger.error(f"Unknown event type for message: {payload}")
         except Exception as e:
             logger.error(f"Error processing message: {e}")
-        finally:
-            await session.close()
     
     message.ack()
 
-def subscribe_to_pubsub():
+async def subscribe_to_pubsub():
     subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = subscriber.subscription_path('landgriffon', PUBSUB_SUBSCRIPTION)
+    subscription_path = subscriber.subscription_path(PROJECT_ID, PUBSUB_SUBSCRIPTION)
 
     # Debugging statement to verify the subscription path
     logger.info(f'Subscription path: {subscription_path}')
     
-    def wrapped_callback(message):
-        asyncio.run(callback(message))
+    async def wrapped_callback(message):
+        await callback(message)
 
-    subscription = subscriber.subscribe(subscription_path, callback=wrapped_callback)
+    streaming_pull_future = subscriber.subscribe(subscription_path, callback=wrapped_callback)
     logger.info(f'Listening for messages on {subscription_path}')
+    
     try:
-        subscription.result()
+        await streaming_pull_future
     except Exception as e:
+        streaming_pull_future.cancel()
+        await streaming_pull_future
         logger.error(f'Listening for messages on {subscription_path} threw an Exception: {e}')
