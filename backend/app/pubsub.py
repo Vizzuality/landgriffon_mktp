@@ -1,10 +1,6 @@
-# app/pubsub_subscriber.py
-
 import json
 import os
-import uuid
 import asyncio
-from datetime import datetime
 from google.cloud import pubsub_v1
 from googleapiclient.discovery import build
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -369,10 +365,9 @@ async def subscribe_to_pubsub():
 
     streaming_pull_future = subscriber.subscribe(subscription_path, callback=wrapped_callback)
     logger.info(f'Listening for messages on {subscription_path}')
-    
+
     try:
-        await streaming_pull_future
+        await asyncio.get_event_loop().run_in_executor(None, streaming_pull_future.result)
     except Exception as e:
         streaming_pull_future.cancel()
-        await streaming_pull_future
         logger.error(f'Listening for messages on {subscription_path} threw an Exception: {e}')
