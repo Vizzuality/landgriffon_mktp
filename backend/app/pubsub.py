@@ -1,7 +1,8 @@
-import datetime
+from datetime import datetime
 import json
 import os
 import asyncio
+import uuid
 from google.cloud import pubsub_v1
 from googleapiclient.discovery import build
 from sqlalchemy import delete
@@ -106,6 +107,7 @@ async def handle_entitlement_creation_requested(payload, session: AsyncSession):
 
     # Convert start_time to datetime object
     start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+    start_time_naive = start_time.replace(tzinfo=None)
 
     async with session.begin():
         result = await session.execute(select(Account).filter(Account.procurement_account_id == procurement_account_id))
@@ -120,7 +122,7 @@ async def handle_entitlement_creation_requested(payload, session: AsyncSession):
                     product_id=product_id,
                     plan_id=plan_id,
                     consumer_id=consumer_id,
-                    start_time=start_time,
+                    start_time=start_time_naive,
                     status='pending'
                 )
                 session.add(db_subscription)
@@ -128,10 +130,10 @@ async def handle_entitlement_creation_requested(payload, session: AsyncSession):
                 db_subscription.product_id = product_id
                 db_subscription.plan_id = plan_id
                 db_subscription.consumer_id = consumer_id
-                db_subscription.start_time = start_time
+                db_subscription.start_time = start_time_naive
                 db_subscription.status = "pending"
             db_account.plan_id = plan_id
-            db_account.start_time = start_time
+            db_account.start_time = start_time_naive
             db_account.consumer_id = consumer_id
             await session.commit()
             logger.info(f"Entitlement creation requested: {subscription_id}")
@@ -142,7 +144,7 @@ async def handle_entitlement_creation_requested(payload, session: AsyncSession):
                 product_id=product_id,
                 plan_id=plan_id,
                 consumer_id=consumer_id,
-                start_time=start_time,
+                start_time=start_time_naive,
                 status='pending'
             )
             session.add(db_subscription)
