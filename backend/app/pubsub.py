@@ -50,19 +50,22 @@ async def approve_account(procurement_account_id):
     name = f'providers/{PROJECT_ID}/accounts/{procurement_account_id}'
     request = service.providers().accounts().approve(
         name=name, body={'approvalName': 'signup'})
-    request.execute()
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, request.execute)
 
 async def approve_entitlement(entitlement_id):
     """Approves the entitlement in the Procurement Service."""
     name = f'providers/{PROJECT_ID}/entitlements/{entitlement_id}'
     request = service.providers().entitlements().approve(name=name, body={})
-    request.execute()
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, request.execute)
 
 async def fetch_entitlement_details(entitlement_id):
     """Fetches the details of an entitlement."""
     name = f'providers/{PROJECT_ID}/entitlements/{entitlement_id}'
     request = service.providers().entitlements().get(name=name)
-    response = request.execute()
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(None, request.execute)
     return response
 
 async def handle_account_created(payload, session: AsyncSession):
@@ -85,7 +88,6 @@ async def handle_account_created(payload, session: AsyncSession):
                 status='pending'  # Assuming new accounts start in 'pending' status
             )
             session.add(db_account)
-            await session.commit()
             logger.info(f"Account created: {procurement_account_id}")
         else:
             logger.info(f"Account already exists: {procurement_account_id}")
@@ -135,7 +137,6 @@ async def handle_entitlement_creation_requested(payload, session: AsyncSession):
             db_account.plan_id = plan_id
             db_account.start_time = start_time_naive
             db_account.consumer_id = consumer_id
-            await session.commit()
             logger.info(f"Entitlement creation requested: {subscription_id}")
         else:
             # Store the entitlement with a reference to the account but don't approve it yet
@@ -148,7 +149,6 @@ async def handle_entitlement_creation_requested(payload, session: AsyncSession):
                 status='pending'
             )
             session.add(db_subscription)
-            await session.commit()
             logger.info(f"Entitlement stored for later approval: {subscription_id}")
 
 async def handle_entitlement_active(payload, session: AsyncSession):
@@ -163,7 +163,6 @@ async def handle_entitlement_active(payload, session: AsyncSession):
         db_subscription = result.scalars().first()
         if db_subscription:
             db_subscription.status = "active"
-            await session.commit()
             logger.info(f"Entitlement activated: {subscription_id}")
             # Set up resources for the customer here
         else:
@@ -183,7 +182,6 @@ async def handle_entitlement_cancelled(payload, session: AsyncSession):
             if db_subscription:
                 # Update the subscription status
                 db_subscription.status = "canceled"
-                await session.commit()
                 logger.info(f"Entitlement canceled: {subscription_id}")
 
                 # Update the parent account status
@@ -191,7 +189,6 @@ async def handle_entitlement_cancelled(payload, session: AsyncSession):
                 account = result.scalars().first()
                 if account:
                     account.status = "entitlement canceled"
-                    await session.commit()
                     logger.info(f"Account status updated to 'entitlement canceled': {account.procurement_account_id}")
                 else:
                     logger.error(f"No account found for ID {db_subscription.account_id} to update status.")
@@ -213,7 +210,6 @@ async def handle_account_approved(procurement_account_id, session: AsyncSession)
                 try:
                     await approve_entitlement(entitlement.subscription_id)
                     entitlement.status = 'active'
-                    await session.commit()
                     logger.info(f"Entitlement approved: {entitlement.subscription_id}")
                 except Exception as e:
                     logger.error(f"Failed to approve entitlement {entitlement.subscription_id}: {e}")
@@ -233,7 +229,6 @@ async def handle_entitlement_deleted(payload, session: AsyncSession):
             db_subscription = result.scalars().first()
             if db_subscription:
                 await session.delete(db_subscription)
-                await session.commit()
                 logger.info(f"Entitlement deleted: {subscription_id}")
             else:
                 logger.error(f"No subscription found for ID {subscription_id} to delete.")
@@ -255,7 +250,6 @@ async def handle_account_deleted(payload, session: AsyncSession):
                 # Delete all related subscriptions first
                 await session.execute(delete(Subscription).filter(Subscription.account_id == db_account.id))
                 await session.delete(db_account)
-                await session.commit()
                 logger.info(f"Account deleted: {procurement_account_id}")
             else:
                 logger.error(f"No account found for ID {procurement_account_id} to delete.")
@@ -280,14 +274,12 @@ async def handle_entitlement_plan_change_requested(payload, session: AsyncSessio
             if db_subscription:
                 db_subscription.plan_id = new_plan
                 db_subscription.status = "plan change requested"
-                await session.commit()
                 logger.info(f"Entitlement plan change requested: {subscription_id} to new plan {new_plan}")
 
                 result = await session.execute(select(Account).filter(Account.id == db_subscription.account_id))
                 account = result.scalars().first()
                 if account:
                     account.plan_id = new_plan
-                    await session.commit()
                     logger.info(f"Account plan updated: {account.procurement_account_id}")
                 
                 # Approve the plan change in the procurement API
@@ -312,7 +304,6 @@ async def handle_entitlement_plan_changed(payload, session: AsyncSession):
             db_subscription = result.scalars().first()
             if db_subscription:
                 db_subscription.status = "active"
-                await session.commit()
                 logger.info(f"Entitlement plan changed and activated: {subscription_id}")
             else:
                 logger.error(f"No subscription found for ID {subscription_id} to activate.")
@@ -325,7 +316,8 @@ async def approve_entitlement_plan_change(entitlement_id, new_plan):
     body = {'pendingPlanName': new_plan}
     logger.debug(f"Approving plan change for entitlement ID: {entitlement_id} with body: {body}")
     request = service.providers().entitlements().approvePlanChange(name=name, body=body)
-    request.execute()
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, request.execute)
     logger.info(f"Plan change approved for entitlement: {entitlement_id} to plan: {new_plan}")
 
 async def callback(message):
