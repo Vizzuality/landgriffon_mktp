@@ -1,8 +1,10 @@
+import datetime
 import json
 import os
 import asyncio
 from google.cloud import pubsub_v1
 from googleapiclient.discovery import build
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.future import select
 from sqlalchemy.orm import sessionmaker
@@ -355,13 +357,15 @@ async def callback(message):
 
 async def subscribe_to_pubsub():
     subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = subscriber.subscription_path(PROJECT_ID, PUBSUB_SUBSCRIPTION)
+    subscription_path = subscriber.subscription_path('landgriffon', PUBSUB_SUBSCRIPTION)
 
     # Debugging statement to verify the subscription path
     logger.info(f'Subscription path: {subscription_path}')
     
-    async def wrapped_callback(message):
-        await callback(message)
+    loop = asyncio.get_event_loop()
+
+    def wrapped_callback(message):
+        asyncio.run_coroutine_threadsafe(callback(message), loop)
 
     streaming_pull_future = subscriber.subscribe(subscription_path, callback=wrapped_callback)
     logger.info(f'Listening for messages on {subscription_path}')
