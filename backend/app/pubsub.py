@@ -21,26 +21,28 @@ GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 # Initialize Google API client
 service = build('cloudcommerceprocurement', 'v1', developerKey=GOOGLE_API_KEY)
 
+_running = False
+
 def _generate_internal_account_id():
     """Generate a unique internal account ID"""
     return str(uuid.uuid4())
 
 def approve_account(procurement_account_id):
     """Approves the account in the Procurement Service."""
-    name = f'providers/DEMO-{PROJECT_ID}/accounts/{procurement_account_id}'
+    name = f'providers/{PROJECT_ID}/accounts/{procurement_account_id}'
     request = service.providers().accounts().approve(
         name=name, body={'approvalName': 'signup'})
     request.execute()
 
 def approve_entitlement(entitlement_id):
     """Approves the entitlement in the Procurement Service."""
-    name = f'providers/DEMO-{PROJECT_ID}/entitlements/{entitlement_id}'
+    name = f'providers/{PROJECT_ID}/entitlements/{entitlement_id}'
     request = service.providers().entitlements().approve(name=name, body={})
     request.execute()
 
 def fetch_entitlement_details(entitlement_id):
     """Fetches the details of an entitlement."""
-    name = f'providers/DEMO-{PROJECT_ID}/entitlements/{entitlement_id}'
+    name = f'providers/{PROJECT_ID}/entitlements/{entitlement_id}'
     request = service.providers().entitlements().get(name=name)
     response = request.execute()
     return response
@@ -279,7 +281,7 @@ def handle_entitlement_plan_changed(payload, db):
 
 def approve_entitlement_plan_change(entitlement_id, new_plan):
     """Approves the entitlement plan change in the Procurement Service."""
-    name = f'providers/DEMO-{PROJECT_ID}/entitlements/{entitlement_id}:approvePlanChange'
+    name = f'providers/{PROJECT_ID}/entitlements/{entitlement_id}:approvePlanChange'
     body = {'pendingPlanName': new_plan}
     logger.debug(f"Approving plan change for entitlement ID: {entitlement_id} with body: {body}")
     request = service.providers().entitlements().approvePlanChange(name=name, body=body)
@@ -320,7 +322,7 @@ def callback(message):
 
 def subscribe_to_pubsub():
     subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = subscriber.subscription_path(PROJECT_ID, PUBSUB_SUBSCRIPTION)
+    subscription_path = subscriber.subscription_path('landgriffon', PUBSUB_SUBSCRIPTION)
 
     # Debugging statement to verify the subscription path
     logger.info(f'Subscription path: {subscription_path}')
@@ -334,3 +336,8 @@ def subscribe_to_pubsub():
         subscription.result()
     except Exception as e:
         logger.error(f'Listening for messages on {subscription_path} threw an Exception: {e}')
+
+
+def stop_subscriber():
+    global _running
+    _running = False

@@ -3,20 +3,28 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 import os
 
+# Import your Base and models
 from app.database import Base
-from app.models import Subscription  
-from backend.config import load_environment
+from app.models import Subscription  # Make sure to import your models
+from app.config import load_environment
 
+# Load environment variables
 load_environment()
 
+# this is the Alembic Config object, which provides
+# access to the values within the .ini file in use.
 config = context.config
 
+# Set the SQLAlchemy database URL
 database_url = os.getenv("ACCOUNTS_DATABASE", "sqlite:///./test.db")
 config.set_main_option("sqlalchemy.url", database_url)
 
-
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
 fileConfig(config.config_file_name)
 
+# Add your model's MetaData object here
+# for 'autogenerate' support
 target_metadata = Base.metadata
 
 def run_migrations_offline():
