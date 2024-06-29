@@ -133,3 +133,5 @@ backend/*.log
 Thumbs.db
 /backend/app/__init__.py
 credentials.json
+instructions.md
+config.yaml
