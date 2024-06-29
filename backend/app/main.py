@@ -1,4 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from app.routers.router import router
 from app.database import engine, Base
 from app.pubsub import subscribe_to_pubsub, stop_subscriber
@@ -34,5 +36,21 @@ def on_shutdown():
     logger.info("Stopping Pub/Sub subscriber...")
     stop_subscriber()
 
+templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 app.include_router(router)
 
+@app.get("/success")
+def success(request: Request):
+    return templates.TemplateResponse("success.html", {"request": request})
+
+@app.get("/failure")
+def failure(request: Request, reason: str = Query(None, description="Reason for failure")):
+    if not reason:
+        reason = "Unknown error"
+    return templates.TemplateResponse("failure.html", {"request": request, "reason": reason})
+
+@app.get("/login")
+def success(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})

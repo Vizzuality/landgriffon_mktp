@@ -1,5 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+import os
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime
+from fastapi.responses import RedirectResponse
+import httpx
+import jwt
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Account, Subscription
@@ -10,7 +14,43 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+JWT_ISSUER = "https://www.googleapis.com/robot/v1/metadata/x509/cloud-commerce-partner@system.gserviceaccount.com"
+JWT_AUDIENCE = os.getenv("PARTNER_DOMAIN_NAME")
+
 # Schemas
+class JWTData(BaseModel):
+    iss: str
+    iat: int
+    exp: int
+    aud: str
+    sub: str
+    google: dict
+
+def get_google_public_key(kid):
+    response = httpx.get(JWT_ISSUER)
+    response.raise_for_status()
+    keys = response.json()
+    return keys[kid]
+
+def validate_jwt(token):
+    unverified_header = jwt.get_unverified_header(token)
+    kid = unverified_header["kid"]
+    public_key = get_google_public_key(kid)
+
+    try:
+        payload = jwt.decode(
+            token,
+            public_key,
+            algorithms=["RS256"],
+            audience=JWT_AUDIENCE,
+            issuer=JWT_ISSUER,
+        )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    return JWTData(**payload)
 class AccountApprovalSchema(BaseModel):
     internal_account_id: str
 
@@ -23,7 +63,7 @@ class SubscriptionSchema(BaseModel):
     status: str  # Include the status field
 
     class Config:
-        from_attributes = True  # Update to comply with Pydantic v2
+        from_attributes = True
 
 class AccountSchema(BaseModel):
     procurement_account_id: str
@@ -31,9 +71,40 @@ class AccountSchema(BaseModel):
     status: str
 
     class Config:
-        from_attributes = True  # Update to comply with Pydantic v2
+        from_attributes = True
 
 # Account Endpoints
+@router.post("/signup")
+def signup(request: Request, db: Session = Depends(get_db)):
+    token = request.headers.get("x-gcp-marketplace-token")
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing JWT token")
+
+    jwt_data = validate_jwt(token)
+    
+    procurement_account_id = jwt_data.sub
+
+    account = db.query(Account).filter(Account.procurement_account_id == procurement_account_id).first()
+    if not account:
+        internal_account_id = _generate_internal_account_id()
+        account = Account(
+            procurement_account_id=procurement_account_id,
+            internal_account_id=internal_account_id,
+            status='pending'
+        )
+        db.add(account)
+    db.commit()
+
+    try:
+        # Use the existing function to approve the account
+        approve_account_endpoint(procurement_account_id, db)
+        logger.info(f"Account approved successfully for procurement_account_id: {procurement_account_id}")
+        return RedirectResponse(url="/success")  # Change "/success" to your desired redirect URL
+    except Exception as e:
+        logger.error(f"Failed to approve account: {e}")
+        return RedirectResponse(url=f"/failure?reason={str(e)}")
+
+
 @router.post("/accounts/{procurement_account_id}/approve", response_model=AccountApprovalSchema)
 def approve_account_endpoint(procurement_account_id: str, db: Session = Depends(get_db)):
     account = db.query(Account).filter(Account.procurement_account_id == procurement_account_id).first()
