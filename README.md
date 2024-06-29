@@ -1,13 +1,12 @@
 # Landgriffon Marketplace
 
-This repository contains the Landgriffon Marketplace Subscriptions Manager, which includes both a backend service built with FastAPI and a frontend application built with React.
+This repository contains the Landgriffon Marketplace Subscriptions Manager built with FastAPI.
 
 ## Table of Contents
 
 - [Project Structure](#project-structure)
 - [Setup](#setup)
   - [Backend Setup](#backend-setup)
-  - [Frontend Setup](#frontend-setup)
 - [Running the Application](#running-the-application)
   - [Using Docker Compose](#using-docker-compose)
   - [Running Backend Separately](#running-backend-separately)
@@ -34,115 +33,84 @@ landgriffon_mktp/
 │   ├── .gitignore
 │   ├── requirements.txt
 │   ├── logging_config.py
-├── frontend/
-│   ├── public/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── App.js
-│   │   ├── index.js
-│   ├── package.json
-│   ├── .env
-│   ├── .gitignore
 ├── .gitignore
 ├── README.md
 </pre>
-
-
 
 ## Setup
 
 ### Backend Setup
 
 1. **Navigate to the backend directory**:
-    ```bash
-    cd backend
-    ```
+
+   ```bash
+   cd backend
+   ```
 
 2. **Create a virtual environment**:
-    ```bash
-    python -m venv env
-    source env/bin/activate  # On Windows use `env\Scripts\activate`
-    ```
+
+   ```bash
+   python -m venv env
+   source env/bin/activate  # On Windows use `env\Scripts\activate`
+   ```
 
 3. **Install dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
+
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 4. **Set up environment variables**:
-    Create a `.env` file in the `backend` directory and add the required environment variables:
-    ```plaintext
-    GOOGLE_CLOUD_PROJECT=your_project_id
-    PUBSUB_SUBSCRIPTION=your_subscription_acount
-    ACCOUNTS_DATABASE=your_db_connection
-    GOOGLE_APPLICATION_CREDENTIALS=your_google_credentials
-    ```
-
-### Frontend Setup
-
-1. **Navigate to the frontend directory**:
-    ```bash
-    cd frontend
-    ```
-
-2. **Install dependencies**:
-    ```bash
-    npm install
-    ```
-
-3. **Set up environment variables**:
-    Create a `.env` file in the `frontend` directory and add the required environment variables if needed.
+   Create a `.env` file in the `backend` directory and add the required environment variables:
+   ```plaintext
+   GOOGLE_CLOUD_PROJECT=your_project_id
+   PUBSUB_SUBSCRIPTION=your_subscription_acount
+   ACCOUNTS_DATABASE=your_db_connection
+   GOOGLE_APPLICATION_CREDENTIALS=your_google_credentials
+   ```
 
 ## Running the Application
 
 ### Using Docker Compose
 
 1. **Ensure you are in the root directory** of the project (`landgriffon_mktp`):
-    ```bash
-    cd /path/to/landgriffon_mktp
-    ```
+
+   ```bash
+   cd /path/to/landgriffon_mktp
+   ```
 
 2. **Create a .env file** in the root directory with the following content:
-    ```plaintext
-    GOOGLE_CLOUD_PROJECT=your_project_id
-    PUBSUB_SUBSCRIPTION=codelab
-    ACCOUNTS_DATABASE=sqlite:///./test.db
-    GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/credentials.json
-    ```
+
+   ```plaintext
+   GOOGLE_CLOUD_PROJECT=your_project_id
+   PUBSUB_SUBSCRIPTION=codelab
+   ACCOUNTS_DATABASE=sqlite:///./test.db
+   GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/credentials.json
+   ```
 
 3. **Build and run the containers**:
-    ```bash
-    docker-compose up --build
-    ```
+   ```bash
+   docker-compose up --build
+   ```
 
 ### Running Backend Separately
 
 1. **Navigate to the backend directory**:
-    ```bash
-    cd backend
-    ```
+
+   ```bash
+   cd backend
+   ```
 
 2. **Activate the virtual environment**:
-    ```bash
-    source env/bin/activate  # On Windows use `env\Scripts\activate`
-    ```
+
+   ```bash
+   source env/bin/activate  # On Windows use `env\Scripts\activate`
+   ```
 
 3. **Run the backend server**:
-    ```bash
-    uvicorn app.main:app --reload
-    ```
-
-### Running Frontend Separately
-
-1. **Navigate to the frontend directory**:
-    ```bash
-    cd frontend
-    ```
-
-2. **Start the frontend development server**:
-    ```bash
-    npm start
-    ```
+   ```bash
+   uvicorn app.main:app --reload
+   ```
 
 ## Environment Variables
 
@@ -152,10 +120,6 @@ landgriffon_mktp/
 - `PUBSUB_SUBSCRIPTION`: The Pub/Sub subscription name
 - `ACCOUNTS_DATABASE`: The database connection string
 - `GOOGLE_APPLICATION_CREDENTIALS`: Path to your Google Cloud credentials JSON file
-
-### Frontend
-
-- Add any necessary environment variables for the frontend in the `frontend/.env` file.
 
 ## Contributing
 
