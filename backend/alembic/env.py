@@ -16,7 +16,7 @@ load_environment()
 config = context.config
 
 # Set the SQLAlchemy database URL
-database_url = os.getenv("ACCOUNTS_DATABASE", "sqlite:///./test.db")
+database_url = os.getenv("ACCOUNTS_DATABASE")
 config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
