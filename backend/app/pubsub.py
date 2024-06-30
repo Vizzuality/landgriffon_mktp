@@ -322,7 +322,7 @@ def callback(message):
 
 def subscribe_to_pubsub():
     subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = subscriber.subscription_path('landgriffon', PUBSUB_SUBSCRIPTION)
+    subscription_path = subscriber.subscription_path('cloudcommerceproc-prod', PUBSUB_SUBSCRIPTION)
 
     # Debugging statement to verify the subscription path
     logger.info(f'Subscription path: {subscription_path}')
@@ -341,3 +341,4 @@ def subscribe_to_pubsub():
 def stop_subscriber():
     global _running
     _running = False
+    
