@@ -1,21 +1,31 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 import httpx
 import jwt
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Account, Subscription
 from pydantic import BaseModel
-from app.pubsub import approve_account, handle_account_approved, approve_entitlement, fetch_entitlement_details, _generate_internal_account_id
+from app.pubsub import (
+    approve_account,
+    handle_account_approved,
+    approve_entitlement,
+    fetch_entitlement_details,
+    _generate_internal_account_id,
+)
 import logging
 
+templates = Jinja2Templates(directory="templates")
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+SECRET_KEY = os.getenv("SECRET_KEY")
 JWT_ISSUER = "https://www.googleapis.com/robot/v1/metadata/x509/cloud-commerce-partner@system.gserviceaccount.com"
 JWT_AUDIENCE = os.getenv("PARTNER_DOMAIN_NAME")
+
 
 # Schemas
 class JWTData(BaseModel):
@@ -26,11 +36,13 @@ class JWTData(BaseModel):
     sub: str
     google: dict
 
+
 def get_google_public_key(kid):
     response = httpx.get(JWT_ISSUER)
     response.raise_for_status()
     keys = response.json()
     return keys[kid]
+
 
 def validate_jwt(token):
     unverified_header = jwt.get_unverified_header(token)
@@ -51,19 +63,29 @@ def validate_jwt(token):
         raise HTTPException(status_code=401, detail="Invalid token")
 
     return JWTData(**payload)
+
+
+def validate_secret_header(request: Request):
+    secret = request.headers.get("x-internal-secret")
+    if secret != SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 class AccountApprovalSchema(BaseModel):
     internal_account_id: str
+
 
 class SubscriptionSchema(BaseModel):
     subscription_id: str
     product_id: str
     plan_id: str
     consumer_id: str
-    start_time: str  # You may want to use datetime if needed
-    status: str  # Include the status field
+    start_time: str
+    status: str
 
     class Config:
         from_attributes = True
+
 
 class AccountSchema(BaseModel):
     procurement_account_id: str
@@ -73,7 +95,18 @@ class AccountSchema(BaseModel):
     class Config:
         from_attributes = True
 
+
 # Account Endpoints
+@router.get("/signup")
+def signup_without_token():
+    return RedirectResponse(url="/thanks")
+
+
+@router.get("/thanks", response_class=HTMLResponse)
+def thanks(request: Request):
+    return templates.TemplateResponse("thanks.html", {"request": request})
+
+
 @router.post("/signup")
 def signup(request: Request, db: Session = Depends(get_db)):
     token = request.headers.get("x-gcp-marketplace-token")
@@ -81,90 +114,92 @@ def signup(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Missing JWT token")
 
     jwt_data = validate_jwt(token)
-    
+
     procurement_account_id = jwt_data.sub
 
-    account = db.query(Account).filter(Account.procurement_account_id == procurement_account_id).first()
+    account = (
+        db.query(Account)
+        .filter(Account.procurement_account_id == procurement_account_id)
+        .first()
+    )
     if not account:
         internal_account_id = _generate_internal_account_id()
         account = Account(
             procurement_account_id=procurement_account_id,
             internal_account_id=internal_account_id,
-            status='pending'
+            status="pending",
         )
         db.add(account)
     db.commit()
 
     try:
-        # Use the existing function to approve the account
         approve_account_endpoint(procurement_account_id, db)
-        logger.info(f"Account approved successfully for procurement_account_id: {procurement_account_id}")
-        return RedirectResponse(url="/success")  # Change "/success" to your desired redirect URL
+        logger.info(
+            f"Account approved successfully for procurement_account_id: {procurement_account_id}"
+        )
+        return RedirectResponse(url="/success")
     except Exception as e:
         logger.error(f"Failed to approve account: {e}")
         return RedirectResponse(url=f"/failure?reason={str(e)}")
 
 
-@router.post("/accounts/{procurement_account_id}/approve", response_model=AccountApprovalSchema)
-def approve_account_endpoint(procurement_account_id: str, db: Session = Depends(get_db)):
-    account = db.query(Account).filter(Account.procurement_account_id == procurement_account_id).first()
+@router.post(
+    "/accounts/{procurement_account_id}/approve", response_model=AccountApprovalSchema
+)
+def approve_account_endpoint(
+    procurement_account_id: str, db: Session = Depends(get_db)
+):
+    validate_secret_header(httpx.request)
+    account = (
+        db.query(Account)
+        .filter(Account.procurement_account_id == procurement_account_id)
+        .first()
+    )
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    if account.status != 'pending':
+    if account.status != "pending":
         raise HTTPException(status_code=400, detail="Account is not in a pending state")
-    
+
     try:
         approve_account(procurement_account_id)
-        account.status = 'active'
+        account.status = "active"
         db.commit()
-        handle_account_approved(procurement_account_id, db)  # Approve related entitlements
+        handle_account_approved(
+            procurement_account_id, db
+        )  # Approve related entitlements
         return account
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to approve account: {e}")
 
-@router.get("/accounts", response_model=list[AccountSchema])
-def get_accounts(db: Session = Depends(get_db)):
-    return db.query(Account).all()
-
-@router.get("/accounts/{account_id}", response_model=AccountSchema)
-def get_account(account_id: str, db: Session = Depends(get_db)):
-    account = db.query(Account).filter(Account.procurement_account_id == account_id).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    return account
-
-# Subscription Endpoints
-@router.get("/subscriptions", response_model=list[SubscriptionSchema])
-def get_subscriptions(db: Session = Depends(get_db)):
-    return db.query(Subscription).all()
-
-@router.get("/subscriptions/{subscription_id}", response_model=SubscriptionSchema)
-def get_subscription(subscription_id: str, db: Session = Depends(get_db)):
-    subscription = db.query(Subscription).filter(Subscription.subscription_id == subscription_id).first()
-    if not subscription:
-        raise HTTPException(status_code=404, detail="Subscription not found")
-    return subscription
 
 @router.post("/subscriptions/{subscription_id}/approve")
 def approve_subscription_endpoint(subscription_id: str, db: Session = Depends(get_db)):
-    subscription = db.query(Subscription).filter(Subscription.subscription_id == subscription_id).first()
+    validate_secret_header(httpx.request)
+    subscription = (
+        db.query(Subscription)
+        .filter(Subscription.subscription_id == subscription_id)
+        .first()
+    )
     if not subscription:
         raise HTTPException(status_code=404, detail="Subscription not found")
-    
+
     try:
         # Fetch the entitlement details to get the associated account ID and plan details
         entitlement_details = fetch_entitlement_details(subscription_id)
-        procurement_account_id = entitlement_details.get('account').split('/')[-1]
-        plan_id = entitlement_details.get('plan')
-        start_time = entitlement_details.get('createTime')
-        consumer_id = entitlement_details.get('usageReportingId')
+        procurement_account_id = entitlement_details.get("account").split("/")[-1]
+        plan_id = entitlement_details.get("plan")
+        start_time = entitlement_details.get("createTime")
+        consumer_id = entitlement_details.get("usageReportingId")
 
-        # Convert start_time to datetime object
         start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
 
         # Update the account with the new plan_id, start_time, and consumer_id
-        account = db.query(Account).filter(Account.procurement_account_id == procurement_account_id).first()
+        account = (
+            db.query(Account)
+            .filter(Account.procurement_account_id == procurement_account_id)
+            .first()
+        )
         if account:
             account.plan_id = plan_id
             account.start_time = start_time
@@ -173,58 +208,12 @@ def approve_subscription_endpoint(subscription_id: str, db: Session = Depends(ge
 
         # Approve the entitlement
         approve_entitlement(subscription_id)
-        subscription.status = 'active'
+        subscription.status = "active"
         db.commit()
         logger.info(f"Entitlement approved: {subscription_id}")
         return {"message": "Subscription approved successfully"}
     except Exception as e:
         logger.error(f"Failed to approve subscription: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to approve subscription: {e}")
-    
-@router.post("/recover_and_approve_account/{subscription_id}")
-def recover_and_approve_account(subscription_id: str, db: Session = Depends(get_db)):
-    try:
-        # Fetch entitlement details and related account details
-        entitlement_details = fetch_entitlement_details(subscription_id)
-        procurement_account_id = entitlement_details.get('account').split('/')[-1]
-        plan_id = entitlement_details.get('plan')
-        consumer_id = entitlement_details.get('usageReportingId')
-        start_time = entitlement_details.get('createTime')
-        
-        # Convert start_time to datetime object
-        start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-        
-        # Create or update account
-        account = db.query(Account).filter(Account.procurement_account_id == procurement_account_id).first()
-        if not account:
-            internal_account_id = _generate_internal_account_id()
-            account = Account(
-                procurement_account_id=procurement_account_id,
-                internal_account_id=internal_account_id,
-                status='pending',
-                plan_id=plan_id,
-                start_time=start_time,
-                consumer_id=consumer_id
-            )
-            db.add(account)
-        else:
-            account.plan_id = plan_id
-            account.start_time = start_time
-            account.consumer_id = consumer_id
-            account.status = 'pending'
-        db.commit()
-        
-        # Approve the account
-        approve_account(procurement_account_id)
-        
-        # Update account status to active
-        account.status = 'active'
-        db.commit()
-        
-        # Approve the related entitlement
-        approve_entitlement(subscription_id)
-        
-        return {"message": "Account and related entitlement approved successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to recover and approve account: {e}")
-
+        raise HTTPException(
+            status_code=500, detail=f"Failed to approve subscription: {e}"
+        )
