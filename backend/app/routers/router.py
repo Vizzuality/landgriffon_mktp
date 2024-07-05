@@ -109,6 +109,7 @@ def thanks(request: Request):
 
 @router.post("/signup")
 def signup(request: Request, db: Session = Depends(get_db)):
+    logger.info(f"Request headers: {request.headers}")
     token = request.headers.get("x-gcp-marketplace-token")
     if not token:
         raise HTTPException(status_code=400, detail="Missing JWT token")

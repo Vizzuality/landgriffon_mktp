@@ -414,9 +414,7 @@ def callback(message):
 
 def subscribe_to_pubsub():
     subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = subscriber.subscription_path(
-        "cloudcommerceproc-prod", PUBSUB_SUBSCRIPTION
-    )
+    subscription_path = subscriber.subscription_path("landgriffon", PUBSUB_SUBSCRIPTION)
 
     logger.info(f"Subscription path: {subscription_path}")
 
