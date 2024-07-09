@@ -91,37 +91,74 @@ def handle_account_active(payload, db):
         logger.error(f"Error handling ACCOUNT_ACTIVE event: {e}")
 
 
-def handle_entitlement_creation_requested(payload, db):
-    entitlement = payload.get("entitlement", {})
-    subscription_id = entitlement.get("id")
-    if not subscription_id:
-        logger.error("No subscription ID found in the message.")
-        return
+def handle_entitlement_event(payload, db):
+    logger.info("Handling ENTITLEMENT_CREATION_REQUESTED event")
 
-    # Fetch the entitlement details to get the associated account ID and plan details
-    entitlement_details = fetch_entitlement_details(subscription_id)
-    procurement_account_id = entitlement_details.get("account").split("/")[-1]
-    product_id = entitlement_details.get("product")
-    plan_id = entitlement_details.get("plan")
-    consumer_id = entitlement_details.get("usageReportingId")
-    start_time = entitlement_details.get("createTime")
+    try:
+        entitlement = payload.get("entitlement", {})
+        subscription_id = entitlement.get("id")
+        if not subscription_id:
+            logger.error("No subscription ID found in the message.")
+            return
 
-    start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        logger.info(f"Fetching details for subscription ID: {subscription_id}")
 
-    db_account = (
-        db.query(Account)
-        .filter(Account.procurement_account_id == procurement_account_id)
-        .first()
-    )
-    if db_account:
-        db_subscription = (
-            db.query(Subscription)
-            .filter(Subscription.subscription_id == subscription_id)
+        # Fetch the entitlement details to get the associated account ID and plan details
+        entitlement_details = fetch_entitlement_details(subscription_id)
+        logger.info(f"Entitlement details: {entitlement_details}")
+
+        procurement_account_id = entitlement_details.get("account").split("/")[-1]
+        product_id = entitlement_details.get("product")
+        plan_id = entitlement_details.get("plan")
+        consumer_id = entitlement_details.get("usageReportingId")
+        start_time = entitlement_details.get("createTime")
+
+        start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+
+        logger.info(f"Procurement account ID: {procurement_account_id}")
+
+        db_account = (
+            db.query(Account)
+            .filter(Account.procurement_account_id == procurement_account_id)
             .first()
         )
-        if not db_subscription:
+
+        logger.info(f"Database account query result: {db_account}")
+
+        if db_account:
+            db_subscription = (
+                db.query(Subscription)
+                .filter(Subscription.subscription_id == subscription_id)
+                .first()
+            )
+            if not db_subscription:
+                db_subscription = Subscription(
+                    account_id=db_account.id,
+                    subscription_id=subscription_id,
+                    product_id=product_id,
+                    plan_id=plan_id,
+                    consumer_id=consumer_id,
+                    start_time=start_time,
+                    status="pending",
+                )
+                db.add(db_subscription)
+                logger.info(f"New subscription created: {db_subscription}")
+            else:
+                db_subscription.product_id = product_id
+                db_subscription.plan_id = plan_id
+                db_subscription.consumer_id = consumer_id
+                db_subscription.start_time = start_time
+                db_subscription.status = "pending"
+                logger.info(f"Updated existing subscription: {db_subscription}")
+
+            db_account.plan_id = plan_id
+            db_account.start_time = start_time
+            db_account.consumer_id = consumer_id
+            db.commit()
+            logger.info(f"Entitlement creation requested: {subscription_id}")
+        else:
+            # Store the entitlement with a reference to the account but don't approve it yet
             db_subscription = Subscription(
-                account_id=db_account.id,
                 subscription_id=subscription_id,
                 product_id=product_id,
                 plan_id=plan_id,
@@ -130,30 +167,11 @@ def handle_entitlement_creation_requested(payload, db):
                 status="pending",
             )
             db.add(db_subscription)
-        else:
-            db_subscription.product_id = product_id
-            db_subscription.plan_id = plan_id
-            db_subscription.consumer_id = consumer_id
-            db_subscription.start_time = start_time
-            db_subscription.status = "pending"
-        db_account.plan_id = plan_id
-        db_account.start_time = start_time
-        db_account.consumer_id = consumer_id
-        db.commit()
-        logger.info(f"Entitlement creation requested: {subscription_id}")
-    else:
-        # Store the entitlement with a reference to the account but don't approve it yet
-        db_subscription = Subscription(
-            subscription_id=subscription_id,
-            product_id=product_id,
-            plan_id=plan_id,
-            consumer_id=consumer_id,
-            start_time=start_time,
-            status="pending",
-        )
-        db.add(db_subscription)
-        db.commit()
-        logger.info(f"Entitlement stored for later approval: {subscription_id}")
+            db.commit()
+            logger.info(f"Entitlement stored for later approval: {subscription_id}")
+    except Exception as e:
+        logger.error(f"Failed to handle ENTITLEMENT_CREATION_REQUESTED event: {e}")
+        db.rollback()
 
 
 def handle_entitlement_active(payload, db):
@@ -376,52 +394,6 @@ def handle_entitlement_plan_changed(payload, db):
         )
 
 
-def handle_entitlement_offer_accepted(payload, db):
-    entitlement = payload.get("entitlement", {})
-    subscription_id = entitlement.get("id")
-    new_plan = entitlement.get("newPlan")
-    if not subscription_id or not new_plan:
-        logger.error("No subscription ID or new plan found in the message.")
-        return
-
-    logger.debug(
-        f"Processing offer accepted for subscription ID: {subscription_id} to new plan: {new_plan}"
-    )
-
-    try:
-        # Update the subscription in the local database
-        db_subscription = (
-            db.query(Subscription)
-            .filter(Subscription.subscription_id == subscription_id)
-            .first()
-        )
-        if db_subscription:
-            db_subscription.plan_id = new_plan
-            db_subscription.status = "offer accepted"
-            db.commit()
-            logger.info(
-                f"Entitlement offer accepted: {subscription_id} to new plan {new_plan}"
-            )
-
-            account = (
-                db.query(Account)
-                .filter(Account.id == db_subscription.account_id)
-                .first()
-            )
-            if account:
-                account.plan_id = new_plan
-                db.commit()
-                logger.info(f"Account plan updated: {account.procurement_account_id}")
-        else:
-            logger.error(
-                f"No subscription found for ID {subscription_id} to process offer acceptance."
-            )
-    except Exception as e:
-        logger.error(
-            f"Failed to process offer acceptance for entitlement {subscription_id}: {e}"
-        )
-
-
 def approve_entitlement_plan_change(entitlement_id, new_plan):
     """Approves the entitlement plan change in the Procurement Service."""
     name = f"providers/{PROJECT_ID}/entitlements/{entitlement_id}:approvePlanChange"
@@ -446,14 +418,14 @@ def callback(message):
     try:
         event_handlers = {
             "ACCOUNT_ACTIVE": handle_account_active,
-            "ENTITLEMENT_CREATION_REQUESTED": handle_entitlement_creation_requested,
+            "ENTITLEMENT_CREATION_REQUESTED": handle_entitlement_event,
             "ENTITLEMENT_ACTIVE": handle_entitlement_active,
             "ENTITLEMENT_CANCELLED": handle_entitlement_cancelled,
             "ENTITLEMENT_DELETED": handle_entitlement_deleted,
             "ACCOUNT_DELETED": handle_account_deleted,
             "ENTITLEMENT_PLAN_CHANGE_REQUESTED": handle_entitlement_plan_change_requested,
             "ENTITLEMENT_PLAN_CHANGED": handle_entitlement_plan_changed,
-            "ENTITLEMENT_OFFER_ACCEPTED": handle_entitlement_offer_accepted,
+            "ENTITLEMENT_OFFER_ACCEPTED": handle_entitlement_event,
             # Add other handlers here
         }
 
