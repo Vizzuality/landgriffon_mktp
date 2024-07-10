@@ -156,6 +156,12 @@ def handle_entitlement_event(payload, db):
             db_account.consumer_id = consumer_id
             db.commit()
             logger.info(f"Entitlement creation requested: {subscription_id}")
+
+            # Approve the entitlement automatically
+            approve_entitlement(subscription_id)
+            db_subscription.status = "active"
+            db.commit()
+            logger.info(f"Entitlement approved automatically: {subscription_id}")
         else:
             # Store the entitlement with a reference to the account but don't approve it yet
             db_subscription = Subscription(

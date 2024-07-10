@@ -108,40 +108,8 @@ def thanks(request: Request):
 
 
 @router.post("/signup")
-def signup(request: Request, db: Session = Depends(get_db)):
-    logger.info(f"Request headers: {request.headers}")
-    token = request.headers.get("x-gcp-marketplace-token")
-    if not token:
-        raise HTTPException(status_code=400, detail="Missing JWT token")
-
-    jwt_data = validate_jwt(token)
-
-    procurement_account_id = jwt_data.sub
-
-    account = (
-        db.query(Account)
-        .filter(Account.procurement_account_id == procurement_account_id)
-        .first()
-    )
-    if not account:
-        internal_account_id = _generate_internal_account_id()
-        account = Account(
-            procurement_account_id=procurement_account_id,
-            internal_account_id=internal_account_id,
-            status="pending",
-        )
-        db.add(account)
-    db.commit()
-
-    try:
-        approve_account_endpoint(procurement_account_id, db)
-        logger.info(
-            f"Account approved successfully for procurement_account_id: {procurement_account_id}"
-        )
-        return RedirectResponse(url="/success")
-    except Exception as e:
-        logger.error(f"Failed to approve account: {e}")
-        return RedirectResponse(url=f"/failure?reason={str(e)}")
+def signup():
+    return RedirectResponse(url="/thanks")
 
 
 @router.post(
