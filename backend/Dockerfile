@@ -1,10 +1,11 @@
 
 FROM python:3.12.1-slim
+RUN apt-get update && apt-get install -y gdb
 RUN pip install poetry
 WORKDIR /app
 COPY requirements.txt .
 COPY . .
-RUN poetry install --only main
+RUN poetry install --no-root
 EXPOSE 8000
 COPY .env.production /app/.env.production
 COPY cred-production.json /app/cred-production.json
