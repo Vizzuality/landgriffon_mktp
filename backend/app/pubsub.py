@@ -87,8 +87,15 @@ def handle_account_active(payload, db):
             logger.info(f"Account created and committed: {procurement_account_id}")
         else:
             logger.info(f"Account already exists: {procurement_account_id}")
+
+        approve_account(procurement_account_id)
+        db_account.status = "active"
+        db.commit()
+        handle_account_approved(procurement_account_id, db)
+
     except Exception as e:
         logger.error(f"Error handling ACCOUNT_ACTIVE event: {e}")
+        db.rollback()
 
 
 def handle_entitlement_event(payload, db):
@@ -156,12 +163,6 @@ def handle_entitlement_event(payload, db):
             db_account.consumer_id = consumer_id
             db.commit()
             logger.info(f"Entitlement creation requested: {subscription_id}")
-
-            # Approve the entitlement automatically
-            approve_entitlement(subscription_id)
-            db_subscription.status = "active"
-            db.commit()
-            logger.info(f"Entitlement approved automatically: {subscription_id}")
         else:
             # Store the entitlement with a reference to the account but don't approve it yet
             db_subscription = Subscription(
