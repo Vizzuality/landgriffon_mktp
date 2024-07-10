@@ -5,7 +5,7 @@ RUN pip install poetry
 WORKDIR /app
 COPY requirements.txt .
 COPY . .
-RUN poetry install --no-root
+RUN poetry install --only main --no-root
 EXPOSE 8000
 COPY .env.production /app/.env.production
 COPY cred-production.json /app/cred-production.json
