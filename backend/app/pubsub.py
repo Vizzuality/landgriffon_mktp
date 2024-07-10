@@ -8,6 +8,7 @@ from app.database import SessionLocal
 from app.models import Account, Subscription
 from app.config import load_environment
 import logging
+import time
 
 load_environment()
 
@@ -19,13 +20,9 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 service = build("cloudcommerceprocurement", "v1", developerKey=GOOGLE_API_KEY)
 
-_running = False
-
-
 def _generate_internal_account_id():
     """Generate a unique internal account ID"""
     return str(uuid.uuid4())
-
 
 def approve_account(procurement_account_id):
     """Approves the account in the Procurement Service."""
@@ -37,13 +34,11 @@ def approve_account(procurement_account_id):
     )
     request.execute()
 
-
 def approve_entitlement(entitlement_id):
     """Approves the entitlement in the Procurement Service."""
     name = f"providers/{PROJECT_ID}/entitlements/{entitlement_id}"
     request = service.providers().entitlements().approve(name=name, body={})
     request.execute()
-
 
 def fetch_entitlement_details(entitlement_id):
     """Fetches the details of an entitlement."""
@@ -51,7 +46,6 @@ def fetch_entitlement_details(entitlement_id):
     request = service.providers().entitlements().get(name=name)
     response = request.execute()
     return response
-
 
 def handle_account_active(payload, db):
     logger.info("Handling ACCOUNT_ACTIVE event")
@@ -80,23 +74,17 @@ def handle_account_active(payload, db):
             db_account = Account(
                 procurement_account_id=procurement_account_id,
                 internal_account_id=internal_account_id,
-                status="pending",
+                status="active",  # Automatically approve the account
             )
             db.add(db_account)
             db.commit()
             logger.info(f"Account created and committed: {procurement_account_id}")
+            handle_account_approved(procurement_account_id, db)  # Approve related entitlements
         else:
             logger.info(f"Account already exists: {procurement_account_id}")
-
-        approve_account(procurement_account_id)
-        db_account.status = "active"
-        db.commit()
-        handle_account_approved(procurement_account_id, db)
-
     except Exception as e:
         logger.error(f"Error handling ACCOUNT_ACTIVE event: {e}")
         db.rollback()
-
 
 def handle_entitlement_event(payload, db):
     logger.info("Handling ENTITLEMENT_CREATION_REQUESTED event")
@@ -110,8 +98,20 @@ def handle_entitlement_event(payload, db):
 
         logger.info(f"Fetching details for subscription ID: {subscription_id}")
 
-        # Fetch the entitlement details to get the associated account ID and plan details
-        entitlement_details = fetch_entitlement_details(subscription_id)
+        # Retry logic for fetching entitlement details
+        retries = 3
+        while retries > 0:
+            try:
+                entitlement_details = fetch_entitlement_details(subscription_id)
+                break
+            except Exception as e:
+                logger.error(f"Error fetching entitlement details: {e}")
+                retries -= 1
+                time.sleep(2)  # Exponential backoff
+        else:
+            logger.error("Failed to fetch entitlement details after retries")
+            return
+
         logger.info(f"Entitlement details: {entitlement_details}")
 
         procurement_account_id = entitlement_details.get("account").split("/")[-1]
@@ -180,7 +180,6 @@ def handle_entitlement_event(payload, db):
         logger.error(f"Failed to handle ENTITLEMENT_CREATION_REQUESTED event: {e}")
         db.rollback()
 
-
 def handle_entitlement_active(payload, db):
     entitlement = payload.get("entitlement", {})
     subscription_id = entitlement.get("id")
@@ -199,7 +198,6 @@ def handle_entitlement_active(payload, db):
         logger.info(f"Entitlement activated: {subscription_id}")
     else:
         logger.error(f"No subscription found for ID {subscription_id} to activate.")
-
 
 def handle_entitlement_cancelled(payload, db):
     entitlement = payload.get("entitlement", {})
@@ -240,6 +238,7 @@ def handle_entitlement_cancelled(payload, db):
             logger.error(f"No subscription found for ID {subscription_id} to cancel.")
     except Exception as e:
         logger.error(f"Failed to cancel entitlement {subscription_id}: {e}")
+        db.rollback()
 
 
 def handle_account_approved(procurement_account_id, db):
@@ -296,6 +295,7 @@ def handle_entitlement_deleted(payload, db):
             logger.error(f"No subscription found for ID {subscription_id} to delete.")
     except Exception as e:
         logger.error(f"Failed to delete entitlement {subscription_id}: {e}")
+        db.rollback()
 
 
 def handle_account_deleted(payload, db):
@@ -323,6 +323,7 @@ def handle_account_deleted(payload, db):
             logger.error(f"No account found for ID {procurement_account_id} to delete.")
     except Exception as e:
         logger.error(f"Failed to delete account {procurement_account_id}: {e}")
+        db.rollback()
 
 
 def handle_entitlement_plan_change_requested(payload, db):
@@ -372,6 +373,7 @@ def handle_entitlement_plan_change_requested(payload, db):
         logger.error(
             f"Failed to process plan change for entitlement {subscription_id}: {e}"
         )
+        db.rollback()
 
 
 def handle_entitlement_plan_changed(payload, db):
@@ -399,6 +401,7 @@ def handle_entitlement_plan_changed(payload, db):
         logger.error(
             f"Failed to activate entitlement plan change for {subscription_id}: {e}"
         )
+        db.rollback()
 
 
 def approve_entitlement_plan_change(entitlement_id, new_plan):
