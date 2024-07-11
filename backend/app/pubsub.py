@@ -8,7 +8,6 @@ from app.database import SessionLocal
 from app.models import Account, Subscription
 from app.config import load_environment
 import logging
-import time
 
 load_environment()
 
@@ -20,25 +19,45 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 service = build("cloudcommerceprocurement", "v1", developerKey=GOOGLE_API_KEY)
 
+
 def _generate_internal_account_id():
     """Generate a unique internal account ID"""
     return str(uuid.uuid4())
 
+
 def approve_account(procurement_account_id):
     """Approves the account in the Procurement Service."""
-    name = f"providers/{PROJECT_ID}/accounts/{procurement_account_id}"
-    request = (
-        service.providers()
-        .accounts()
-        .approve(name=name, body={"approvalName": "signup"})
-    )
-    request.execute()
+    try:
+        name = f"providers/{PROJECT_ID}/accounts/{procurement_account_id}"
+        request = (
+            service.providers()
+            .accounts()
+            .approve(name=name, body={"approvalName": "signup"})
+        )
+        request.execute()
+        logger.info(
+            f"Account {procurement_account_id} approved successfully in Procurement Service."
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to approve account {procurement_account_id} in Procurement Service: {e}"
+        )
+
 
 def approve_entitlement(entitlement_id):
     """Approves the entitlement in the Procurement Service."""
-    name = f"providers/{PROJECT_ID}/entitlements/{entitlement_id}"
-    request = service.providers().entitlements().approve(name=name, body={})
-    request.execute()
+    try:
+        name = f"providers/{PROJECT_ID}/entitlements/{entitlement_id}"
+        request = service.providers().entitlements().approve(name=name, body={})
+        request.execute()
+        logger.info(
+            f"Entitlement {entitlement_id} approved successfully in Procurement Service."
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to approve entitlement {entitlement_id} in Procurement Service: {e}"
+        )
+
 
 def fetch_entitlement_details(entitlement_id):
     """Fetches the details of an entitlement."""
@@ -46,6 +65,7 @@ def fetch_entitlement_details(entitlement_id):
     request = service.providers().entitlements().get(name=name)
     response = request.execute()
     return response
+
 
 def handle_account_active(payload, db):
     logger.info("Handling ACCOUNT_ACTIVE event")
@@ -74,17 +94,28 @@ def handle_account_active(payload, db):
             db_account = Account(
                 procurement_account_id=procurement_account_id,
                 internal_account_id=internal_account_id,
-                status="active",  # Automatically approve the account
+                status="pending",
             )
             db.add(db_account)
             db.commit()
             logger.info(f"Account created and committed: {procurement_account_id}")
-            handle_account_approved(procurement_account_id, db)  # Approve related entitlements
+            approve_account(procurement_account_id)
         else:
             logger.info(f"Account already exists: {procurement_account_id}")
+
+        # Approve the account in the Procurement Service
+
+        # Update account status to active
+        db_account.status = "active"
+        db.commit()
+        logger.info(
+            f"Account {procurement_account_id} status updated to active in the database."
+        )
+
     except Exception as e:
         logger.error(f"Error handling ACCOUNT_ACTIVE event: {e}")
         db.rollback()
+
 
 def handle_entitlement_event(payload, db):
     logger.info("Handling ENTITLEMENT_CREATION_REQUESTED event")
@@ -98,20 +129,8 @@ def handle_entitlement_event(payload, db):
 
         logger.info(f"Fetching details for subscription ID: {subscription_id}")
 
-        # Retry logic for fetching entitlement details
-        retries = 3
-        while retries > 0:
-            try:
-                entitlement_details = fetch_entitlement_details(subscription_id)
-                break
-            except Exception as e:
-                logger.error(f"Error fetching entitlement details: {e}")
-                retries -= 1
-                time.sleep(2)  # Exponential backoff
-        else:
-            logger.error("Failed to fetch entitlement details after retries")
-            return
-
+        # Fetch the entitlement details to get the associated account ID and plan details
+        entitlement_details = fetch_entitlement_details(subscription_id)
         logger.info(f"Entitlement details: {entitlement_details}")
 
         procurement_account_id = entitlement_details.get("account").split("/")[-1]
@@ -133,6 +152,11 @@ def handle_entitlement_event(payload, db):
         logger.info(f"Database account query result: {db_account}")
 
         if db_account:
+            # Ensure the account is approved
+            if db_account.status != "active":
+                logger.error(f"Account {procurement_account_id} is not approved yet.")
+                return
+
             db_subscription = (
                 db.query(Subscription)
                 .filter(Subscription.subscription_id == subscription_id)
@@ -163,22 +187,22 @@ def handle_entitlement_event(payload, db):
             db_account.consumer_id = consumer_id
             db.commit()
             logger.info(f"Entitlement creation requested: {subscription_id}")
-        else:
-            # Store the entitlement with a reference to the account but don't approve it yet
-            db_subscription = Subscription(
-                subscription_id=subscription_id,
-                product_id=product_id,
-                plan_id=plan_id,
-                consumer_id=consumer_id,
-                start_time=start_time,
-                status="pending",
-            )
-            db.add(db_subscription)
+
+            # Approve the entitlement in the Procurement Service
+            approve_entitlement(subscription_id)
+            db_subscription.status = "active"
             db.commit()
-            logger.info(f"Entitlement stored for later approval: {subscription_id}")
+            logger.info(f"Entitlement {subscription_id} approved successfully.")
+
+        else:
+            logger.error(
+                f"No account found for procurement account ID: {procurement_account_id}"
+            )
+
     except Exception as e:
         logger.error(f"Failed to handle ENTITLEMENT_CREATION_REQUESTED event: {e}")
         db.rollback()
+
 
 def handle_entitlement_active(payload, db):
     entitlement = payload.get("entitlement", {})
@@ -198,6 +222,7 @@ def handle_entitlement_active(payload, db):
         logger.info(f"Entitlement activated: {subscription_id}")
     else:
         logger.error(f"No subscription found for ID {subscription_id} to activate.")
+
 
 def handle_entitlement_cancelled(payload, db):
     entitlement = payload.get("entitlement", {})
@@ -436,7 +461,6 @@ def callback(message):
             "ENTITLEMENT_PLAN_CHANGE_REQUESTED": handle_entitlement_plan_change_requested,
             "ENTITLEMENT_PLAN_CHANGED": handle_entitlement_plan_changed,
             "ENTITLEMENT_OFFER_ACCEPTED": handle_entitlement_event,
-            # Add other handlers here
         }
 
         handler = event_handlers.get(event_type)
@@ -448,8 +472,11 @@ def callback(message):
         logger.error(f"Error processing message: {e}")
     finally:
         db.close()
+        logger.info("Closing database session")
 
+    logger.info("Acknowledging message")
     message.ack()
+    logger.info("Message acknowledged")
 
 
 def subscribe_to_pubsub():
