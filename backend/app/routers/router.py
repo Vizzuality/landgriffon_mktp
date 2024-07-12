@@ -99,7 +99,7 @@ class AccountSchema(BaseModel):
 # Account Endpoints
 @router.get("/signup")
 def signup_without_token():
-    return RedirectResponse(url="/thanks")
+    return RedirectResponse(url="/thanks", status_code=303)
 
 
 @router.get("/thanks", response_class=HTMLResponse)

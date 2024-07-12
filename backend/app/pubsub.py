@@ -25,7 +25,7 @@ def _generate_internal_account_id():
     return str(uuid.uuid4())
 
 
-def approve_account(procurement_account_id):
+def approve_account(procurement_account_id, db):
     """Approves the account in the Procurement Service."""
     try:
         name = f"providers/{PROJECT_ID}/accounts/{procurement_account_id}"
@@ -35,6 +35,25 @@ def approve_account(procurement_account_id):
             .approve(name=name, body={"approvalName": "signup"})
         )
         request.execute()
+
+        # Update account status to active after approval
+        db_account = (
+            db.query(Account)
+            .filter(Account.procurement_account_id == procurement_account_id)
+            .first()
+        )
+        if db_account:
+            db_account.status = "active"
+            db.commit()
+            logger.info(
+                f"Account {procurement_account_id} status updated to active in the database."
+            )
+            handle_account_approved(procurement_account_id, db)
+        else:
+            logger.error(
+                f"Account {procurement_account_id} not found in the database after approval."
+            )
+
         logger.info(
             f"Account {procurement_account_id} approved successfully in Procurement Service."
         )
@@ -99,18 +118,9 @@ def handle_account_active(payload, db):
             db.add(db_account)
             db.commit()
             logger.info(f"Account created and committed: {procurement_account_id}")
-            approve_account(procurement_account_id)
-        else:
-            logger.info(f"Account already exists: {procurement_account_id}")
 
-        # Approve the account in the Procurement Service
-
-        # Update account status to active
-        db_account.status = "active"
-        db.commit()
-        logger.info(
-            f"Account {procurement_account_id} status updated to active in the database."
-        )
+        # Always approve the account in the Procurement Service
+        approve_account(procurement_account_id, db)
 
     except Exception as e:
         logger.error(f"Error handling ACCOUNT_ACTIVE event: {e}")
@@ -152,11 +162,6 @@ def handle_entitlement_event(payload, db):
         logger.info(f"Database account query result: {db_account}")
 
         if db_account:
-            # Ensure the account is approved
-            if db_account.status != "active":
-                logger.error(f"Account {procurement_account_id} is not approved yet.")
-                return
-
             db_subscription = (
                 db.query(Subscription)
                 .filter(Subscription.subscription_id == subscription_id)
@@ -188,11 +193,17 @@ def handle_entitlement_event(payload, db):
             db.commit()
             logger.info(f"Entitlement creation requested: {subscription_id}")
 
-            # Approve the entitlement in the Procurement Service
-            approve_entitlement(subscription_id)
-            db_subscription.status = "active"
-            db.commit()
-            logger.info(f"Entitlement {subscription_id} approved successfully.")
+            # Ensure the account is approved
+            if db_account.status == "active":
+                # Approve the entitlement in the Procurement Service
+                approve_entitlement(subscription_id)
+                db_subscription.status = "active"
+                db.commit()
+                logger.info(f"Entitlement {subscription_id} approved successfully.")
+            else:
+                logger.error(
+                    f"Account {procurement_account_id} is not approved yet. Entitlement will be processed once the account is active."
+                )
 
         else:
             logger.error(
@@ -274,6 +285,9 @@ def handle_account_approved(procurement_account_id, db):
         .first()
     )
     if db_account and db_account.status == "active":
+        logger.info(
+            f"Handling related entitlement with approved: {procurement_account_id}"
+        )
         # Approve all pending entitlements for this account
         pending_entitlements = (
             db.query(Subscription)
