@@ -1,13 +1,18 @@
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, time
 from google.cloud import pubsub_v1
 from googleapiclient.discovery import build
 from app.database import SessionLocal
 from app.models import Account, Subscription
 from app.config import load_environment
 import logging
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from requests.exceptions import SSLError
+from googleapiclient.errors import HttpError
 
 load_environment()
 
@@ -17,7 +22,16 @@ PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
 PUBSUB_SUBSCRIPTION = os.getenv("PUBSUB_SUBSCRIPTION")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-service = build("cloudcommerceprocurement", "v1", developerKey=GOOGLE_API_KEY)
+# Configure the requests session with retries
+session = requests.Session()
+retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+adapter = HTTPAdapter(max_retries=retries)
+session.mount("https://", adapter)
+
+
+# Define a function to build a new API client
+def get_procurement_service():
+    return build("cloudcommerceprocurement", "v1", developerKey=GOOGLE_API_KEY)
 
 
 def _generate_internal_account_id():
@@ -27,45 +41,63 @@ def _generate_internal_account_id():
 
 def approve_account(procurement_account_id, db):
     """Approves the account in the Procurement Service."""
-    try:
-        name = f"providers/{PROJECT_ID}/accounts/{procurement_account_id}"
-        request = (
-            service.providers()
-            .accounts()
-            .approve(name=name, body={"approvalName": "signup"})
-        )
-        request.execute()
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            service = get_procurement_service()
+            name = f"providers/{PROJECT_ID}/accounts/{procurement_account_id}"
+            request = (
+                service.providers()
+                .accounts()
+                .approve(name=name, body={"approvalName": "signup"})
+            )
+            request.execute()
 
-        # Update account status to active after approval
-        db_account = (
-            db.query(Account)
-            .filter(Account.procurement_account_id == procurement_account_id)
-            .first()
-        )
-        if db_account:
-            db_account.status = "active"
-            db.commit()
+            # Update account status to active after approval
+            db_account = (
+                db.query(Account)
+                .filter(Account.procurement_account_id == procurement_account_id)
+                .first()
+            )
+            if db_account:
+                db_account.status = "active"
+                db.commit()
+                logger.info(
+                    f"Account {procurement_account_id} status updated to active in the database."
+                )
+                handle_account_approved(procurement_account_id, db)
+            else:
+                logger.error(
+                    f"Account {procurement_account_id} not found in the database after approval."
+                )
+
             logger.info(
-                f"Account {procurement_account_id} status updated to active in the database."
+                f"Account {procurement_account_id} approved successfully in Procurement Service."
             )
-            handle_account_approved(procurement_account_id, db)
-        else:
+            return
+        except HttpError as e:
+            if e.resp.status in [500, 502, 503, 504]:
+                logger.warning(f"Server error {e.resp.status}. Retrying...")
+                time.sleep(2**attempt)  # Exponential backoff
+            else:
+                logger.error(
+                    f"Failed to approve account {procurement_account_id} in Procurement Service: {e}"
+                )
+                break
+        except SSLError as e:
+            logger.warning(f"SSL error: {e}. Retrying...")
+            time.sleep(2**attempt)  # Exponential backoff
+        except Exception as e:
             logger.error(
-                f"Account {procurement_account_id} not found in the database after approval."
+                f"Failed to approve account {procurement_account_id} in Procurement Service: {e}"
             )
-
-        logger.info(
-            f"Account {procurement_account_id} approved successfully in Procurement Service."
-        )
-    except Exception as e:
-        logger.error(
-            f"Failed to approve account {procurement_account_id} in Procurement Service: {e}"
-        )
+            break
 
 
 def approve_entitlement(entitlement_id):
     """Approves the entitlement in the Procurement Service."""
     try:
+        service = get_procurement_service()
         name = f"providers/{PROJECT_ID}/entitlements/{entitlement_id}"
         request = service.providers().entitlements().approve(name=name, body={})
         request.execute()
@@ -80,6 +112,7 @@ def approve_entitlement(entitlement_id):
 
 def fetch_entitlement_details(entitlement_id):
     """Fetches the details of an entitlement."""
+    service = get_procurement_service()
     name = f"providers/{PROJECT_ID}/entitlements/{entitlement_id}"
     request = service.providers().entitlements().get(name=name)
     response = request.execute()
@@ -249,7 +282,6 @@ def handle_entitlement_cancelled(payload, db):
             .first()
         )
         if db_subscription:
-            # Update the subscription status
             db_subscription.status = "canceled"
             db.commit()
             logger.info(f"Entitlement canceled: {subscription_id}")
@@ -445,16 +477,24 @@ def handle_entitlement_plan_changed(payload, db):
 
 def approve_entitlement_plan_change(entitlement_id, new_plan):
     """Approves the entitlement plan change in the Procurement Service."""
-    name = f"providers/{PROJECT_ID}/entitlements/{entitlement_id}:approvePlanChange"
-    body = {"pendingPlanName": new_plan}
-    logger.debug(
-        f"Approving plan change for entitlement ID: {entitlement_id} with body: {body}"
-    )
-    request = service.providers().entitlements().approvePlanChange(name=name, body=body)
-    request.execute()
-    logger.info(
-        f"Plan change approved for entitlement: {entitlement_id} to plan: {new_plan}"
-    )
+    try:
+        service = get_procurement_service()
+        name = f"providers/{PROJECT_ID}/entitlements/{entitlement_id}:approvePlanChange"
+        body = {"pendingPlanName": new_plan}
+        logger.debug(
+            f"Approving plan change for entitlement ID: {entitlement_id} with body: {body}"
+        )
+        request = (
+            service.providers().entitlements().approvePlanChange(name=name, body=body)
+        )
+        request.execute()
+        logger.info(
+            f"Plan change approved for entitlement: {entitlement_id} to plan: {new_plan}"
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to approve entitlement plan change for {entitlement_id}: {e}"
+        )
 
 
 def callback(message):

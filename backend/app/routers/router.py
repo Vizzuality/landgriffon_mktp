@@ -116,9 +116,9 @@ def signup():
     "/accounts/{procurement_account_id}/approve", response_model=AccountApprovalSchema
 )
 def approve_account_endpoint(
-    procurement_account_id: str, db: Session = Depends(get_db)
+    procurement_account_id: str, request: Request, db: Session = Depends(get_db)
 ):
-    validate_secret_header(httpx.request)
+    validate_secret_header(request)
     account = (
         db.query(Account)
         .filter(Account.procurement_account_id == procurement_account_id)
@@ -131,7 +131,7 @@ def approve_account_endpoint(
         raise HTTPException(status_code=400, detail="Account is not in a pending state")
 
     try:
-        approve_account(procurement_account_id)
+        approve_account(procurement_account_id, db)
         account.status = "active"
         db.commit()
         handle_account_approved(
@@ -143,8 +143,10 @@ def approve_account_endpoint(
 
 
 @router.post("/subscriptions/{subscription_id}/approve")
-def approve_subscription_endpoint(subscription_id: str, db: Session = Depends(get_db)):
-    validate_secret_header(httpx.request)
+def approve_subscription_endpoint(
+    subscription_id: str, request: Request, db: Session = Depends(get_db)
+):
+    validate_secret_header(request)
     subscription = (
         db.query(Subscription)
         .filter(Subscription.subscription_id == subscription_id)
@@ -185,4 +187,31 @@ def approve_subscription_endpoint(subscription_id: str, db: Session = Depends(ge
         logger.error(f"Failed to approve subscription: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to approve subscription: {e}"
+        )
+
+
+@router.post("/entitlements/{entitlement_id}/approve")
+def approve_entitlement_endpoint(
+    entitlement_id: str, request: Request, db: Session = Depends(get_db)
+):
+    validate_secret_header(request)
+    entitlement = (
+        db.query(Subscription)
+        .filter(Subscription.subscription_id == entitlement_id)
+        .first()
+    )
+    if not entitlement:
+        raise HTTPException(status_code=404, detail="Entitlement not found")
+
+    try:
+        # Approve the entitlement
+        approve_entitlement(entitlement_id)
+        entitlement.status = "active"
+        db.commit()
+        logger.info(f"Entitlement approved: {entitlement_id}")
+        return {"message": "Entitlement approved successfully"}
+    except Exception as e:
+        logger.error(f"Failed to approve entitlement: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to approve entitlement: {e}"
         )
